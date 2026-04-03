@@ -13,14 +13,25 @@ fn main() {
             Ok(mut _stream) => {
                 let reader = BufReader::new(&_stream);
                 let request_line = reader.lines().next().unwrap().unwrap();
-                let path = request_line.split_whitespace().nth(1);
+                let path = request_line.split_whitespace().nth(1).unwrap();
                 println!("accepted new connection");
-                if path == Some("/") {
-                    _stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
-                } else {
-                    _stream
-                        .write_all(b"HTTP/1.1 404 Not Found\r\n\r\n")
-                        .unwrap();
+
+                match path {
+                    "/" => _stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").unwrap(),
+                    p if p.starts_with("/echo/") => {
+                        let content = p.strip_prefix("/echo/").unwrap();
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                            content.len(),
+                            content
+                        );
+                        _stream.write_all(response.as_bytes()).unwrap();
+                    }
+                    _ => {
+                        _stream
+                            .write_all(b"HTTP/1.1 404 Not Found\r\n\r\n")
+                            .unwrap();
+                    }
                 }
             }
             Err(e) => {
