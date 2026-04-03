@@ -12,13 +12,18 @@ fn main() {
         match stream {
             Ok(mut _stream) => {
                 let reader = BufReader::new(&_stream);
-                let request_line = reader.lines().next().unwrap().unwrap();
+                let mut lines = reader.lines();
+                let request_line = lines.next().unwrap().unwrap();
                 let path = request_line.split_whitespace().nth(1).unwrap();
+                let headers = lines
+                    .filter_map(|x| x.ok())
+                    .find(|x| x.starts_with("User-Agent"))
+                    .unwrap();
                 println!("accepted new connection");
 
                 match path {
                     "/" => _stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").unwrap(),
-                    p if p.starts_with("/echo/") => {
+                    p if p.starts_with("/echo") => {
                         let content = p.strip_prefix("/echo/").unwrap();
                         let response = format!(
                             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
@@ -27,6 +32,17 @@ fn main() {
                         );
                         _stream.write_all(response.as_bytes()).unwrap();
                     }
+
+                    p if p.starts_with("/user-agent") => {
+                        let content = headers.split(": ").nth(1).unwrap();
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                            content.len(),
+                            content
+                        );
+                        _stream.write_all(response.as_bytes()).unwrap()
+                    }
+
                     _ => {
                         _stream
                             .write_all(b"HTTP/1.1 404 Not Found\r\n\r\n")
