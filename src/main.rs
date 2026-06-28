@@ -45,12 +45,26 @@ fn main() {
                         "/" => _stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").unwrap(),
                         p if p.starts_with("/echo") => {
                             let content = p.strip_prefix("/echo/").unwrap();
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                                content.len(),
-                                content
-                            );
-                            _stream.write_all(response.as_bytes()).unwrap();
+                            let encoding = headers
+                                .iter()
+                                .find(|h| h.starts_with("Accept-Encoding"))
+                                .and_then(|h| h.split(": ").nth(1));
+                            if encoding == Some("gzip") {
+                                let response = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: {}\r\nContent-Length: {}\r\n\r\n{}",
+                                    encoding.unwrap(),
+                                    content.len(),
+                                    content
+                                );
+                                _stream.write_all(response.as_bytes()).unwrap();
+                            } else {
+                                let response = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                    content.len(),
+                                    content
+                                );
+                                _stream.write_all(response.as_bytes()).unwrap();
+                            }
                         }
 
                         p if p.starts_with("/user-agent") => {
