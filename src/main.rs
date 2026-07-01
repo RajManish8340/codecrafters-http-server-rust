@@ -6,6 +6,8 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
 };
 
+use flate2::{Compression, write::GzEncoder};
+
 fn get_dir_arg() -> Option<String> {
     let args: Vec<String> = env::args().collect();
     for i in 0..=args.len() - 1 {
@@ -45,6 +47,7 @@ fn main() {
                         "/" => _stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").unwrap(),
                         p if p.starts_with("/echo") => {
                             let content = p.strip_prefix("/echo/").unwrap();
+                            let mut content_bytes: Vec<u8> = content.bytes().collect();
                             let encodings = headers
                                 .iter()
                                 .find(|h| h.starts_with("Accept-Encoding"))
@@ -55,13 +58,17 @@ fn main() {
                                 let gzip_encoding = vec_encoding.find(|g| g.starts_with("gzip"));
 
                                 if gzip_encoding == Some("gzip") {
+                                    let mut encoder =
+                                        GzEncoder::new(Vec::new(), Compression::default());
+                                    encoder.write_all(content_bytes.as_slice()).unwrap();
+                                    content_bytes = encoder.finish().unwrap();
                                     let response = format!(
-                                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: {}\r\nContent-Length: {}\r\n\r\n{}",
+                                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: {}\r\nContent-Length: {}\r\n\r\n",
                                         gzip_encoding.unwrap(),
-                                        content.len(),
-                                        content
+                                        content_bytes.len(),
                                     );
                                     _stream.write_all(response.as_bytes()).unwrap();
+                                    _stream.write_all(content_bytes.as_slice()).unwrap();
                                 } else {
                                     let response = format!(
                                         "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
