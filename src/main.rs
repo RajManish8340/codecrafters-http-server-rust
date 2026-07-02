@@ -28,9 +28,6 @@ fn main() {
                     loop {
                         let mut request_line = String::new();
                         reader.read_line(&mut request_line).unwrap();
-                        if request_line == "" {
-                            break;
-                        }
 
                         let method = request_line.split_whitespace().nth(0).unwrap();
                         let path = request_line.split_whitespace().nth(1).unwrap();
@@ -45,9 +42,23 @@ fn main() {
                             }
                             headers.push(line);
                         }
+                        let closed_header = headers
+                            .iter()
+                            .find(|c| c.starts_with("Connection"))
+                            .and_then(|c| c.split(": ").nth(1));
+                        let should_close = closed_header == Some("close");
+                        let connection_header = if should_close {
+                            "Connection: close\r\n"
+                        } else {
+                            ""
+                        };
 
                         match path {
-                            "/" => _stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").unwrap(),
+                            "/" => {
+                                let response =
+                                    format!("HTTP/1.1 200 OK\r\n{}\r\n", connection_header);
+                                _stream.write_all(response.as_bytes()).unwrap();
+                            }
                             p if p.starts_with("/echo") => {
                                 let content = p.strip_prefix("/echo/").unwrap();
                                 let mut content_bytes: Vec<u8> = content.bytes().collect();
@@ -67,7 +78,8 @@ fn main() {
                                         encoder.write_all(content_bytes.as_slice()).unwrap();
                                         content_bytes = encoder.finish().unwrap();
                                         let response = format!(
-                                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: {}\r\nContent-Length: {}\r\n\r\n",
+                                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}Content-Encoding: {}\r\nContent-Length: {}\r\n\r\n",
+                                            connection_header,
                                             gzip_encoding.unwrap(),
                                             content_bytes.len(),
                                         );
@@ -75,7 +87,8 @@ fn main() {
                                         _stream.write_all(content_bytes.as_slice()).unwrap();
                                     } else {
                                         let response = format!(
-                                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}Content-Length: {}\r\n\r\n{}",
+                                            connection_header,
                                             content.len(),
                                             content
                                         );
@@ -83,7 +96,8 @@ fn main() {
                                     }
                                 } else {
                                     let response = format!(
-                                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}Content-Length: {}\r\n\r\n{}",
+                                        connection_header,
                                         content.len(),
                                         content
                                     );
@@ -98,7 +112,8 @@ fn main() {
                                     .unwrap();
                                 let content = header.split(": ").nth(1).unwrap();
                                 let response = format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}Content-Length: {}\r\n\r\n{}",
+                                    connection_header,
                                     content.len(),
                                     content
                                 );
@@ -116,7 +131,8 @@ fn main() {
                                     match file_content {
                                         Ok(fc) => {
                                             let header_response = format!(
-                                                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
+                                                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n{}Content-Length: {}\r\n\r\n",
+                                                connection_header,
                                                 fc.len(),
                                             );
                                             _stream.write_all(header_response.as_bytes()).unwrap();
@@ -165,12 +181,8 @@ fn main() {
                                     .unwrap();
                             }
                         }
-                        let closed_header = headers
-                            .iter()
-                            .find(|c| c.starts_with("Connection"))
-                            .and_then(|c| c.split(": ").nth(1));
 
-                        if closed_header == Some("close") {
+                        if should_close {
                             break;
                         };
                     }
