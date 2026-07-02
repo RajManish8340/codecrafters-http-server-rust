@@ -4,7 +4,12 @@ A simple HTTP server built from scratch in Rust, created as part of the [CodeCra
 
 ## What it does
 
-This server listens on `127.0.0.1:4221` and handles HTTP/1.1 requests. It supports multiple concurrent connections using threads, and responds to the following endpoints:
+This server listens on `127.0.0.1:4221` and handles HTTP/1.1 requests. It supports:
+
+- Multiple **concurrent connections** via threads
+- **Persistent connections** (HTTP/1.1 keep-alive by default)
+- **Explicit connection closure** via `Connection: close` header
+- **gzip compression** via `Accept-Encoding: gzip` header
 
 ### Endpoints
 
@@ -57,7 +62,24 @@ hello
 
 ---
 
-### 3. User-Agent endpoint
+### 3. Echo with gzip compression
+```bash
+curl -v -H "Accept-Encoding: gzip" http://localhost:4221/echo/hello | hexdump -C
+```
+Expected response:
+```
+HTTP/1.1 200 OK
+Content-Type: text/plain
+Content-Encoding: gzip
+Content-Length: 25
+```
+The body will be binary gzip data starting with `1f 8b` (gzip magic bytes).
+
+If the client sends an unsupported encoding, the server responds without `Content-Encoding` and returns the plain body.
+
+---
+
+### 4. User-Agent endpoint
 ```bash
 curl -v http://localhost:4221/user-agent
 ```
@@ -72,7 +94,7 @@ curl/8.5.0
 
 ---
 
-### 4. GET a file
+### 5. GET a file
 First create a file in your directory:
 ```bash
 echo "hello world" > /tmp/test.txt
@@ -98,7 +120,7 @@ HTTP/1.1 404 Not Found
 
 ---
 
-### 5. POST a file
+### 6. POST a file
 ```bash
 curl -v --data "12345" -H "Content-Type: application/octet-stream" http://localhost:4221/files/file_123
 ```
@@ -115,14 +137,30 @@ cat /tmp/file_123
 
 ---
 
-### 6. Concurrent connections
+### 7. Persistent connections
+Send multiple requests over the same connection:
 ```bash
-(sleep 1 && printf "GET / HTTP/1.1\r\n\r\n") | nc localhost 4221 &
-(sleep 1 && printf "GET / HTTP/1.1\r\n\r\n") | nc localhost 4221 &
-(sleep 1 && printf "GET / HTTP/1.1\r\n\r\n") | nc localhost 4221 &
+curl --http1.1 -v http://localhost:4221/echo/banana --next http://localhost:4221/user-agent -H "User-Agent: test"
 ```
+Both requests reuse the same TCP connection (`Re-using existing connection` in curl output).
 
-All three should receive `200 OK` responses simultaneously.
+---
+
+### 8. Explicit connection closure
+```bash
+curl --http1.1 -v http://localhost:4221/echo/orange --next http://localhost:4221/ -H "Connection: close"
+```
+- First request: connection stays open
+- Second request: server echoes `Connection: close` in response and closes the connection
+
+---
+
+### 9. Concurrent connections
+```bash
+curl --http1.1 -v http://localhost:4221/echo/apple --next http://localhost:4221/echo/mango &
+curl --http1.1 -v http://localhost:4221/echo/banana --next http://localhost:4221/user-agent -H "User-Agent: test" &
+```
+Both connections are handled simultaneously, each keeping their own persistent state.
 
 ---
 
@@ -145,5 +183,13 @@ The server reads it in three steps:
 ### Concurrency
 Each incoming connection is handled in its own thread using `std::thread::spawn`, so multiple clients can connect at the same time without blocking each other.
 
+### Persistent connections
+Each thread runs a `loop` — after responding to a request, it loops back and waits for the next one on the same TCP connection. The loop breaks when:
+- The client sends `Connection: close`
+- The client closes the connection (empty request line)
+
+### gzip compression
+If the request includes `Accept-Encoding: gzip` (or a comma-separated list containing `gzip`), the server compresses the response body using the `flate2` crate and adds `Content-Encoding: gzip` to the response. The `Content-Length` reflects the **compressed** size.
+
 ### File serving
-The `--directory` flag sets the base directory at startup. All file reads and writes are relative to this directory.
+The `--directory` flag sets the base directory at startup. All file reads and writes use this directory as the root.
